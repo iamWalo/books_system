@@ -1,0 +1,13 @@
+node_modules/
+
+# Local environment variables and secrets
+.env
+server/.env
+
+# Uploaded/runtime files
+server/uploads/
+
+# Logs and local editor files
+*.log
+.DS_Store
+.vscode/
