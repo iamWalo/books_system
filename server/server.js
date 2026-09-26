@@ -6,7 +6,8 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const productRoutes = require('./routes/productRoutes');
 const categoryRoutes = require('./routes/CategoryRoutes');
-const seriesRoutes = require('./routes/serieRoutes')
+const seriesRoutes = require('./routes/serieRoutes');
+const blogRoutes = require('./routes/blogRoutes');
 const app = express();
 
 app.use(cors());
@@ -20,7 +21,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/api/products', productRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/series', seriesRoutes);
-
+app.use('/api/blogs', blogRoutes);
 // MongoDB Connection
 const PORT = process.env.PORT || 5000;
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -33,7 +34,7 @@ if (!MONGODB_URI) {
 mongoose
     .connect(MONGODB_URI)
     .then(() => {
-        app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+        app.listen(PORT, "0.0.0.0", () => console.log(`Server running on port ${PORT}`));
         console.log('Connected to MongoDB');
     })
     .catch((err) => console.error('MongoDB Connection Error:', err));

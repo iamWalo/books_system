@@ -4,6 +4,7 @@ const productSchema = new mongoose.Schema(
     {
         name: { type: String, required: true, trim: true },
         price: { type: Number, required: true, min: 0 },
+        image: { type: String, default: '' },
         // HTML string input stored as raw string
         description: { type: String, default: '' },
         descriptionImages: [{ type: String }],
@@ -19,6 +20,12 @@ const productSchema = new mongoose.Schema(
         ageRange: { type: String, default: '' },
         bookChapters: [{ type: String }],
         productImages: [{ type: String }],
+        chapters: [
+            {
+                type: String,
+                trim: true
+            }
+        ]
     },
     { timestamps: true }
 );

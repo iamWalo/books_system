@@ -4,7 +4,7 @@
   "description": "",
   "main": "server/server.js",
   "scripts": {
-    "start": "C:\\PROGRA~1\\nodejs\\node.exe .\\server\\server.js",
+    "start": "node server/server.js",
     "dev": "C:\\PROGRA~1\\nodejs\\node.exe node_modules/nodemon/bin/nodemon.js server/server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

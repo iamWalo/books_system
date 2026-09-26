@@ -2,6 +2,21 @@ const Product = require('../models/Product');
 const fs = require('fs');
 const path = require('path');
 
+const getUploadedFiles = (req) => req.files || (req.file ? [req.file] : []);
+
+const getImagePaths = (req) => getUploadedFiles(req)
+    .map((file) => `/uploads/products/${file.filename}`);
+
+const getArrayValue = (value) => {
+    if (Array.isArray(value)) return value;
+    if (typeof value === 'string' && value.length > 0) return [value];
+    return [];
+};
+
+const deleteUploadedFiles = (req) => {
+    getImagePaths(req).forEach(deleteImageFile);
+};
+
 const deleteImageFile = (imagePath) => {
     if (!imagePath) return;
     const fullPath = path.join(__dirname, '..', imagePath);
@@ -50,15 +65,20 @@ exports.getProductById = async (req, res) => {
 exports.createProduct = async (req, res) => {
     try {
         const productData = { ...req.body };
-        if (req.file) {
-            productData.image = `/uploads/products/${req.file.filename}`;
+        const imagePaths = getImagePaths(req);
+        if (imagePaths.length > 0) {
+            productData.image = imagePaths[0];
+            productData.productImages = [
+                ...getArrayValue(productData.productImages),
+                ...imagePaths.slice(1),
+            ];
         }
 
         const product = new Product(productData);
         await product.save();
         res.status(201).json(product);
     } catch (error) {
-        if (req.file) deleteImageFile(`/uploads/products/${req.file.filename}`);
+        deleteUploadedFiles(req);
         res.status(400).json({ message: error.message });
     }
 };
@@ -70,10 +90,15 @@ exports.updateProduct = async (req, res) => {
         if (!product) return res.status(404).json({ message: 'Product not found' });
 
         const updateData = { ...req.body };
+        const imagePaths = getImagePaths(req);
 
-        if (req.file) {
+        if (imagePaths.length > 0) {
             if (product.image) deleteImageFile(product.image);
-            updateData.image = `/uploads/products/${req.file.filename}`;
+            updateData.image = imagePaths[0];
+            updateData.productImages = [
+                ...getArrayValue(updateData.productImages),
+                ...imagePaths.slice(1),
+            ];
         }
 
         const updatedProduct = await Product.findByIdAndUpdate(
@@ -84,7 +109,7 @@ exports.updateProduct = async (req, res) => {
 
         res.status(200).json(updatedProduct);
     } catch (error) {
-        if (req.file) deleteImageFile(`/uploads/products/${req.file.filename}`);
+        deleteUploadedFiles(req);
         res.status(400).json({ message: error.message });
     }
 };
