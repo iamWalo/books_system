@@ -1,114 +1,165 @@
 const Serie = require('../models/Serie');
 const Product = require('../models/Product');
 
-// Get all series with populated books
+const normalizeImagePath = (imagePath) => {
+    if (!imagePath) return imagePath;
+    const normalizedPath = String(imagePath).replace(/\\/g, '/').replace(/^\/+/, '');
+    return normalizedPath.startsWith('uploads/')
+        ? `/${normalizedPath}`
+        : `/uploads/${normalizedPath}`;
+};
+
+// 1. Get all series
 exports.getSeries = async (req, res) => {
     try {
-        const series = await Serie.find().populate('books', 'name image price');
-        res.status(200).json({ success: true, data: series });
+        const series = await Serie.find().populate('books');
+        res.status(200).json(series);
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ message: error.message });
     }
 };
 
+// 2. Create series
 // Create Serie
 exports.createSerie = async (req, res) => {
     try {
-        const { name, description, books } = req.body;
-        const imagePath = req.file ? `/uploads/${req.file.filename}` : '';
-
-        let parsedBooks = [];
-        if (books) {
-            parsedBooks = typeof books === 'string' ? JSON.parse(books) : books;
+        if (!req.body) {
+            return res.status(400).json({ message: 'Request body is missing.' });
         }
 
-        const serie = new Serie({
-            name,
-            description,
-            image: imagePath,
-            books: parsedBooks,
+        const { name, description, color } = req.body;
+
+        if (!name || !name.trim()) {
+            return res.status(400).json({ message: 'Series name is required.' });
+        }
+
+        // 1. Process Image Path if file was uploaded via upload.js
+        let imageUrl = '';
+        if (req.file) {
+            // Determines subfolder dynamically from file path or defaults to series
+            const folder = req.baseUrl.includes('categories') ? 'categories' : 'series';
+            imageUrl = normalizeImagePath(`${folder}/${req.file.filename}`);
+        }
+
+        // 2. Parse Books Array sent via FormData
+        let books = [];
+        if (req.body.books) {
+            try {
+                books = typeof req.body.books === 'string' ? JSON.parse(req.body.books) : req.body.books;
+            } catch (e) {
+                books = [];
+            }
+        }
+
+        // 3. Create and save the series
+        const newSerie = new Serie({
+            name: name.trim(),
+            description: description || '',
+            color: color || '#0F4000',
+            image: imageUrl,
+            books: Array.isArray(books) ? books : []
         });
 
-        const savedSerie = await serie.save();
-
-        if (parsedBooks.length > 0) {
-            await Product.updateMany(
-                { _id: { $in: parsedBooks } },
-                { serie: savedSerie._id }
-            );
-        }
-
-        res.status(201).json({ success: true, data: savedSerie });
+        const savedSerie = await newSerie.save();
+        return res.status(201).json(savedSerie);
     } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
+        return res.status(500).json({ message: error.message || 'Error creating series.' });
     }
 };
+// Alias for naming consistency
+exports.createSeries = exports.createSerie;
 
-// Update Serie
+// 3. Update series
 exports.updateSerie = async (req, res) => {
     try {
-        const { name, description, books } = req.body;
-        const updateData = { name, description };
-
-        if (req.file) {
-            updateData.image = `/uploads/${req.file.filename}`;
+        if (!req.body) {
+            return res.status(400).json({ message: 'Request body is missing.' });
         }
 
-        if (books) {
-            updateData.books = typeof books === 'string' ? JSON.parse(books) : books;
+        const { name, description, color } = req.body;
+        let books;
+
+        if (req.body.books) {
+            try {
+                books = typeof req.body.books === 'string' ? JSON.parse(req.body.books) : req.body.books;
+            } catch (e) {
+                books = [];
+            }
         }
 
-        const serie = await Serie.findByIdAndUpdate(req.params.id, updateData, { new: true }).populate('books', 'name image price');
+        const updateData = {
+            ...(name && { name: name.trim() }),
+            ...(description !== undefined && { description }),
+            ...(color && { color }),
+            ...(req.body.image !== undefined && { image: normalizeImagePath(req.body.image) }),
+            ...(req.file && { image: normalizeImagePath(`series/${req.file.filename}`) }),
+            ...(books !== undefined && { books })
+        };
 
-        if (!serie) {
-            return res.status(404).json({ success: false, message: 'Serie not found' });
-        }
+        const updatedSerie = await Serie.findByIdAndUpdate(
+            req.params.id,
+            updateData,
+            { returnDocument: 'after' }
+        );
 
-        res.status(200).json({ success: true, data: serie });
+        res.status(200).json(updatedSerie);
     } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
+        res.status(500).json({ message: error.message });
     }
 };
 
-// Add book to serie
+exports.updateSeries = exports.updateSerie;
+
+// 4. Delete series
+exports.deleteSerie = async (req, res) => {
+    try {
+        const serieId = req.params.id;
+
+        const activeProductsCount = await Product.countDocuments({ serie: serieId });
+        if (activeProductsCount > 0) {
+            return res.status(400).json({
+                message: `Cannot delete series. There are ${activeProductsCount} book(s) assigned to this series.`
+            });
+        }
+
+        await Serie.findByIdAndDelete(serieId);
+        res.status(200).json({ message: 'Series deleted successfully.' });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+exports.deleteSeries = exports.deleteSerie;
+
+// 5. Add book to series
 exports.addBookToSerie = async (req, res) => {
     try {
+        const { id: serieId } = req.params;
         const { bookId } = req.body;
-        const serie = await Serie.findById(req.params.id);
 
-        if (!serie) {
-            return res.status(404).json({ success: false, message: 'Serie not found' });
-        }
+        await Serie.findByIdAndUpdate(serieId, { $addToSet: { books: bookId } });
+        await Product.findByIdAndUpdate(bookId, { serie: serieId });
 
-        if (!serie.books.includes(bookId)) {
-            serie.books.push(bookId);
-            await serie.save();
-            await Product.findByIdAndUpdate(bookId, { serie: serie._id });
-        }
-
-        const updated = await Serie.findById(serie._id).populate('books', 'name image price');
-        res.status(200).json({ success: true, data: updated });
+        res.status(200).json({ message: 'Book added to series successfully.' });
     } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
+        res.status(500).json({ message: error.message });
     }
 };
 
-// Remove book from serie
+exports.addBookToSeries = exports.addBookToSerie;
+
+// 6. Remove book from series
 exports.removeBookFromSerie = async (req, res) => {
     try {
-        const { bookId } = req.params;
-        const serie = await Serie.findById(req.params.id);
+        const { id: serieId, bookId } = req.params;
 
-        if (!serie) {
-            return res.status(404).json({ success: false, message: 'Serie not found' });
-        }
+        await Serie.findByIdAndUpdate(serieId, { $pull: { books: bookId } });
+        await Product.findByIdAndUpdate(bookId, { $unset: { serie: "" } });
 
-        serie.books = serie.books.filter((b) => b.toString() !== bookId);
-        await serie.save();
-
-        const updated = await Serie.findById(serie._id).populate('books', 'name image price');
-        res.status(200).json({ success: true, data: updated });
+        res.status(200).json({ message: 'Book removed from series successfully.' });
     } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
+        res.status(500).json({ message: error.message });
     }
 };
+
+exports.removeBookFromSeries = exports.removeBookFromSerie;

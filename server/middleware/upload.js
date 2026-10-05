@@ -1,16 +1,28 @@
-
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-const uploadDir = path.join(__dirname, '../uploads/products');
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
+// Ensure base uploads directory exists
+const baseUploadDir = path.join(__dirname, '../uploads');
+if (!fs.existsSync(baseUploadDir)) {
+    fs.mkdirSync(baseUploadDir, { recursive: true });
 }
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
-        cb(null, uploadDir);
+        // Dynamically route destination based on endpoint path or fallback to default
+        let subFolder = 'general';
+        if (req.baseUrl.includes('series')) subFolder = 'series';
+        else if (req.baseUrl.includes('categories')) subFolder = 'categories';
+        else if (req.baseUrl.includes('products')) subFolder = 'products';
+        else if (req.baseUrl.includes('blogs')) subFolder = 'blogs';
+
+        const destDir = path.join(baseUploadDir, subFolder);
+        if (!fs.existsSync(destDir)) {
+            fs.mkdirSync(destDir, { recursive: true });
+        }
+
+        cb(null, destDir);
     },
     filename: (req, file, cb) => {
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);

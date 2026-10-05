@@ -2,30 +2,76 @@ const mongoose = require('mongoose');
 
 const productSchema = new mongoose.Schema(
     {
-        name: { type: String, required: true, trim: true },
-        price: { type: Number, required: true, min: 0 },
-        image: { type: String, default: '' },
-        // HTML string input stored as raw string
-        description: { type: String, default: '' },
-        descriptionImages: [{ type: String }],
-        category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },
-        serie: { type: mongoose.Schema.Types.ObjectId, ref: 'Serie', default: null },
-        status: {
+        name: {
             type: String,
-            enum: ['In Stock', 'Out of Stock', 'Pre-order', 'Draft'],
-            default: 'In Stock'
+            required: [true, 'Product name is required'],
+            trim: true,
         },
-        size: { type: String, default: '' },
-        pagesNumber: { type: Number, min: 0, default: 0 },
-        ageRange: { type: String, default: '' },
-        bookChapters: [{ type: String }],
-        productImages: [{ type: String }],
-        chapters: [
+        subtitle: {
+            type: String,
+            default: '',
+            trim: true,
+        },
+        productLink: {
+            type: String,
+            default: '',
+            trim: true,
+        },
+        price: {
+            type: Number,
+            required: [true, 'Product price is required'],
+            min: 0,
+        },
+        description: {
+            type: String,
+            default: '',
+        },
+        category: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Category',
+        },
+        categories: [
             {
                 type: String,
-                trim: true
-            }
-        ]
+                enum: ['story_book', 'best_selling'],
+            },
+        ],
+        serie: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Serie',
+        },
+        status: {
+            type: String,
+            enum: ['Active', 'Inactive'],
+            default: 'Active',
+        },
+        size: {
+            type: String,
+            default: '',
+        },
+        pagesNumber: {
+            type: Number,
+            default: 0,
+        },
+        ageRange: {
+            type: String,
+            default: '',
+        },
+        bookChapters: [
+            {
+                type: String,
+            },
+        ],
+        productImages: [
+            {
+                type: String,
+            },
+        ],
+        descriptionImages: [
+            {
+                type: String,
+            },
+        ],
     },
     { timestamps: true }
 );

@@ -2,6 +2,18 @@ const Blog = require('../models/Blog');
 const BlogCategory = require('../models/BlogCategory');
 const mongoose = require('mongoose');
 
+const getBlogData = (req) => ({
+    ...req.body,
+    ...(req.file && { bannerImage: `/uploads/blogs/${req.file.filename}` }),
+});
+
+const hasValidBlogId = (req, res) => {
+    if (mongoose.Types.ObjectId.isValid(req.params.id)) return true;
+
+    res.status(400).json({ success: false, message: 'Invalid blog ID.' });
+    return false;
+};
+
 const resolveBlogIds = async (posts = []) => {
     const values = Array.isArray(posts) ? posts : [posts];
     const ids = values.filter((value) => mongoose.Types.ObjectId.isValid(value));
@@ -20,14 +32,6 @@ const resolveBlogIds = async (posts = []) => {
     }
 
     return values.map((value) => blogsByTitle.get(value) || value);
-};
-
-const validateBlogCategory = (category) => {
-    if (typeof category !== 'string' || !category.trim()) {
-        const error = new Error('Category is required');
-        error.statusCode = 400;
-        throw error;
-    }
 };
 
 // GET /api/blogs - Fetch all blogs (with optional search filter)
@@ -49,6 +53,8 @@ const getBlogs = async (req, res) => {
 
 // GET /api/blogs/:id - Get a single blog by ID
 const getBlogById = async (req, res) => {
+    if (!hasValidBlogId(req, res)) return;
+
     try {
         const blog = await Blog.findById(req.params.id);
         if (!blog) {
@@ -63,8 +69,7 @@ const getBlogById = async (req, res) => {
 // POST /api/blogs - Create a new blog post
 const createBlog = async (req, res) => {
     try {
-        validateBlogCategory(req.body.category);
-        const blog = await Blog.create(req.body);
+        const blog = await Blog.create(getBlogData(req));
         res.status(201).json({ success: true, data: blog });
     } catch (error) {
         res.status(error.statusCode || 400).json({ success: false, message: error.message });
@@ -73,12 +78,11 @@ const createBlog = async (req, res) => {
 
 // PUT /api/blogs/:id - Update an existing blog post
 const updateBlog = async (req, res) => {
+    if (!hasValidBlogId(req, res)) return;
+
     try {
-        if (Object.prototype.hasOwnProperty.call(req.body, 'category')) {
-            validateBlogCategory(req.body.category);
-        }
-        const blog = await Blog.findByIdAndUpdate(req.params.id, req.body, {
-            new: true,
+        const blog = await Blog.findByIdAndUpdate(req.params.id, getBlogData(req), {
+            returnDocument: 'after',
             runValidators: true,
         });
 
@@ -94,6 +98,8 @@ const updateBlog = async (req, res) => {
 
 // DELETE /api/blogs/:id - Delete a blog post
 const deleteBlog = async (req, res) => {
+    if (!hasValidBlogId(req, res)) return;
+
     try {
         const blog = await Blog.findByIdAndDelete(req.params.id);
         if (!blog) {

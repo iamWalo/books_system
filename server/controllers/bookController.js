@@ -42,7 +42,7 @@ exports.updateBookChapters = async (req, res) => {
         const updatedBook = await Book.findByIdAndUpdate(
             id,
             { chapters },
-            { new: true, runValidators: true }
+            { returnDocument: 'after', runValidators: true }
         );
 
         if (!updatedBook) {

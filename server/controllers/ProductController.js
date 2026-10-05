@@ -1,130 +1,187 @@
 const Product = require('../models/Product');
-const fs = require('fs');
-const path = require('path');
 
-const getUploadedFiles = (req) => req.files || (req.file ? [req.file] : []);
-
-const getImagePaths = (req) => getUploadedFiles(req)
-    .map((file) => `/uploads/products/${file.filename}`);
-
-const getArrayValue = (value) => {
-    if (Array.isArray(value)) return value;
-    if (typeof value === 'string' && value.length > 0) return [value];
-    return [];
+const normalizeImagePath = (imagePath) => {
+    if (!imagePath) return imagePath;
+    const normalizedPath = String(imagePath).replace(/\\/g, '/').replace(/^\/+/, '');
+    return normalizedPath.startsWith('uploads/')
+        ? `/${normalizedPath}`
+        : `/uploads/${normalizedPath}`;
 };
 
-const deleteUploadedFiles = (req) => {
-    getImagePaths(req).forEach(deleteImageFile);
+const getRelativePath = (file) => normalizeImagePath(`products/${file.filename}`);
+
+// Helper to handle single string or array values sent via FormData
+const parseArrayField = (field) => {
+    if (!field) return [];
+    if (Array.isArray(field)) return field;
+    return [field]; // Wrap single string input into array
 };
 
-const deleteImageFile = (imagePath) => {
-    if (!imagePath) return;
-    const fullPath = path.join(__dirname, '..', imagePath);
-    if (fs.existsSync(fullPath)) {
-        fs.unlink(fullPath, (err) => {
-            if (err) console.error('Failed to delete image file:', err);
-        });
-    }
-};
-
-// GET /api/products
+// Get All Products
 exports.getProducts = async (req, res) => {
     try {
-        const { search, category, status } = req.query;
-        let query = {};
+        const products = await Product.find()
+            .populate('category')
+            .populate('serie')
+            .sort({ createdAt: -1 });
 
-        if (search) {
-            query.name = { $regex: search, $options: 'i' };
-        }
-        if (category) {
-            query.category = category;
-        }
-        if (status) {
-            query.status = status;
-        }
-
-        const products = await Product.find(query).sort({ createdAt: -1 });
-        res.status(200).json(products);
+        res.status(200).json({ success: true, data: products });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ success: false, message: error.message });
     }
 };
 
-// GET /api/products/:id
+// Get Single Product by ID
 exports.getProductById = async (req, res) => {
     try {
-        const product = await Product.findById(req.params.id);
-        if (!product) return res.status(404).json({ message: 'Product not found' });
-        res.status(200).json(product);
+        const product = await Product.findById(req.params.id)
+            .populate('category')
+            .populate('serie');
+
+        if (!product) {
+            return res.status(404).json({ success: false, message: 'Product not found' });
+        }
+
+        res.status(200).json({ success: true, data: product });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ success: false, message: error.message });
     }
 };
 
-// POST /api/products
+// Create Product
 exports.createProduct = async (req, res) => {
     try {
-        const productData = { ...req.body };
-        const imagePaths = getImagePaths(req);
-        if (imagePaths.length > 0) {
-            productData.image = imagePaths[0];
-            productData.productImages = [
-                ...getArrayValue(productData.productImages),
-                ...imagePaths.slice(1),
-            ];
-        }
+        const {
+            name,
+            subtitle,
+            productLink,
+            price,
+            description,
+            category,
+            serie,
+            status,
+            size,
+            pagesNumber,
+            ageRange,
+        } = req.body;
 
-        const product = new Product(productData);
+        const categories = parseArrayField(req.body.categories);
+        const bookChapters = parseArrayField(req.body.bookChapters);
+
+        // Process newly uploaded files with clean relative paths
+        const filesList = Array.isArray(req.files) ? req.files : [];
+        const productImages = filesList
+            .filter((file) => file.fieldname === 'productImages')
+            .map(getRelativePath);
+
+        const descriptionImages = filesList
+            .filter((file) => file.fieldname === 'descriptionImages')
+            .map(getRelativePath);
+
+        const product = new Product({
+            name,
+            subtitle,
+            productLink,
+            price,
+            description,
+            category: category || null,
+            categories,
+            serie: serie || null,
+            status: status || 'Active',
+            size,
+            pagesNumber,
+            ageRange,
+            bookChapters,
+            productImages,
+            descriptionImages,
+        });
+
         await product.save();
-        res.status(201).json(product);
+        res.status(201).json({ success: true, data: product });
     } catch (error) {
-        deleteUploadedFiles(req);
-        res.status(400).json({ message: error.message });
+        res.status(400).json({ success: false, message: error.message });
     }
 };
 
-// PUT /api/products/:id
+// Update Product
 exports.updateProduct = async (req, res) => {
     try {
-        const product = await Product.findById(req.params.id);
-        if (!product) return res.status(404).json({ message: 'Product not found' });
+        const {
+            name,
+            subtitle,
+            productLink,
+            price,
+            description,
+            category,
+            serie,
+            status,
+            size,
+            pagesNumber,
+            ageRange,
+        } = req.body;
 
-        const updateData = { ...req.body };
-        const imagePaths = getImagePaths(req);
+        // Retain existing image paths sent back from the frontend
+        const existingProductImages = parseArrayField(req.body.existingProductImages);
+        const existingDescriptionImages = parseArrayField(req.body.existingDescriptionImages);
 
-        if (imagePaths.length > 0) {
-            if (product.image) deleteImageFile(product.image);
-            updateData.image = imagePaths[0];
-            updateData.productImages = [
-                ...getArrayValue(updateData.productImages),
-                ...imagePaths.slice(1),
-            ];
+        // Process new uploaded files
+        const filesList = Array.isArray(req.files) ? req.files : [];
+        const newProductImages = filesList
+            .filter((file) => file.fieldname === 'productImages')
+            .map(getRelativePath);
+
+        const newDescriptionImages = filesList
+            .filter((file) => file.fieldname === 'descriptionImages')
+            .map(getRelativePath);
+
+        // Combine retained existing images with newly uploaded images
+        const finalProductImages = [...existingProductImages, ...newProductImages];
+        const finalDescriptionImages = [...existingDescriptionImages, ...newDescriptionImages];
+
+        const updatedData = {
+            name,
+            subtitle,
+            productLink,
+            price,
+            description,
+            category: category || null,
+            categories: parseArrayField(req.body.categories),
+            serie: serie || null,
+            status: status || 'Active',
+            size,
+            pagesNumber,
+            ageRange,
+            bookChapters: parseArrayField(req.body.bookChapters),
+            productImages: finalProductImages.map(normalizeImagePath),
+            descriptionImages: finalDescriptionImages.map(normalizeImagePath),
+        };
+
+        const product = await Product.findByIdAndUpdate(req.params.id, updatedData, {
+            returnDocument: 'after',
+            runValidators: true,
+        })
+            .populate('category')
+            .populate('serie');
+
+        if (!product) {
+            return res.status(404).json({ success: false, message: 'Product not found' });
         }
 
-        const updatedProduct = await Product.findByIdAndUpdate(
-            req.params.id,
-            updateData,
-            { new: true, runValidators: true }
-        );
-
-        res.status(200).json(updatedProduct);
-    } catch (error) {
-        deleteUploadedFiles(req);
-        res.status(400).json({ message: error.message });
+        res.status(200).json({ success: true, data: product });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
     }
 };
 
-// DELETE /api/products/:id
+// Delete Product
 exports.deleteProduct = async (req, res) => {
     try {
-        const product = await Product.findById(req.params.id);
-        if (!product) return res.status(404).json({ message: 'Product not found' });
-
-        if (product.image) deleteImageFile(product.image);
-        await Product.findByIdAndDelete(req.params.id);
-
-        res.status(200).json({ message: 'Product deleted successfully' });
+        const product = await Product.findByIdAndDelete(req.params.id);
+        if (!product) {
+            return res.status(404).json({ success: false, message: 'Product not found' });
+        }
+        res.status(200).json({ success: true, message: 'Product deleted successfully' });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ success: false, message: error.message });
     }
 };

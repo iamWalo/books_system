@@ -1,165 +1,119 @@
-# Dashboard Frontend API Report
+# Dashboard Frontend API Handoff
 
-## Verified Connection
+This document describes the API contracts currently implemented in `server/`. Use the endpoint and payload details below instead of inferring behavior from UI labels or older API notes.
 
-The API is currently running successfully with:
+## Frontend Copilot Instructions
 
-```text
-http://localhost:4000
-```
+> Integrate the dashboard with the existing Express API. Read the API base URL from frontend configuration; the previously verified local URL was `http://localhost:4000`, while the server reads `PORT` from `server/.env` and defaults to `5000`. Use `/api/products`, `/api/categories`, `/api/series`, and `/api/blogs` exactly as listed below. Respect each endpoint's actual response shape: product lists return `{ success, data }`; category and series lists return raw arrays; blog endpoints return `{ success, data }` (the blog list also has `count`). Product create/update use `FormData` and image fields named `productImages` and `descriptionImages`; blog create/update can use `FormData` with a `bannerImage` file. Never set the multipart `Content-Type` header manually. Category create/update and series create accept a single `image` file; series update currently ignores uploaded image changes. Resolve relative `/uploads/...` paths against the API base URL. Use only the fields and status values documented here, handle non-2xx responses and loading/empty states, and do not assume pagination, authentication, or unlisted endpoints exist. `bookChapters` is a product string array; there is no chapter-management route.
 
-The port is configured by `server/.env`. Do not assume port `5000`; the current environment uses `4000`.
+## Connection And Shared Behavior
 
-Verified requests:
-
-```text
-GET http://localhost:4000/api/products   -> 200
-GET http://localhost:4000/api/categories -> 200
-```
-
-The API enables CORS and serves static files from `/uploads`.
-
-## Frontend API Client
-
-Use this base URL in the dashboard:
-
-```js
-const API_URL = 'http://localhost:4000';
-```
-
-For image fields, prepend `API_URL` when the value starts with `/`:
-
-```js
-const imageUrl = imagePath ? `${API_URL}${imagePath}` : '';
-```
-
-Always handle loading, empty, and HTTP error states.
+- Configure the base URL per environment. For local development, use the port printed by the server; the code uses `PORT` from `server/.env` and falls back to `5000`. `http://localhost:4000` was previously verified in this workspace but may differ from the current runtime.
+- The API enables CORS and serves static files under `/uploads`.
+- For an image path beginning with `/`, build the URL as `${API_URL}${imagePath}`. Product image paths may lack the leading slash, so normalize them before joining.
+- No endpoint currently requires authentication. The server allows requests from all origins.
+- Unless specified otherwise, send JSON for non-upload operations. Check `response.ok`; error responses commonly include a `message` field, but envelope formats vary by endpoint.
 
 ## Products
 
 Base route: `/api/products`
 
-| Method | Endpoint | Body | Response |
+| Method | Endpoint | Request | Success response |
 |---|---|---|---|
-| GET | `/api/products` | Optional query: `search`, `category`, `status` | Raw product array |
-| GET | `/api/products/:id` | None | Product object |
-| POST | `/api/products` | `multipart/form-data` | Created product |
-| PUT | `/api/products/:id` | `multipart/form-data` | Updated product |
-| DELETE | `/api/products/:id` | None | `{ message }` |
+| GET | `/api/products` | No implemented query filters | `{ success: true, data: Product[] }` |
+| GET | `/api/products/:id` | None | `{ success: true, data: Product }` |
+| POST | `/api/products` | JSON or multipart form data | `201 { success: true, data: Product }` |
+| PUT | `/api/products/:id` | JSON or multipart form data | `{ success: true, data: Product }` |
+| DELETE | `/api/products/:id` | None | `{ success: true, message }` |
 
 Product fields:
 
 ```json
 {
   "name": "Book name",
+  "subtitle": "Optional subtitle",
   "price": 20,
-  "description": "HTML or text",
+  "description": "Text or HTML",
   "category": "CATEGORY_ID",
+  "categories": ["story_book"],
   "serie": "SERIE_ID",
-  "status": "In Stock",
+  "status": "Active",
   "size": "A5",
   "pagesNumber": 120,
   "ageRange": "10-14",
-  "bookChapters": [],
-  "chapters": [],
-  "productImages": []
+  "bookChapters": ["Chapter 1"],
+  "productImages": ["uploads/products/image.png"],
+  "descriptionImages": []
 }
 ```
 
-Required fields are `name`, `price`, and `category`.
+- Required by the schema: `name` and `price`. `category` is an optional single category ID; `categories` is a separate array of `story_book` and/or `best_selling` labels.
+- `status` is `Active` or `Inactive` (default: `Active`). Price must be zero or greater. `pagesNumber` is numeric.
+- GET list and detail populate `category` and `serie`; expect populated objects rather than IDs in those fields when reading products.
+- Product listing does not currently implement `search`, `category`, or `status` query filters, and there is no pagination.
+- Uploads use `multipart/form-data`, up to 10 MB per file. Use `productImages` for product images and `descriptionImages` for description images. The upload middleware accepts JPEG, PNG, and WebP. Multiple files are supported.
+- For PUT, include `existingProductImages` and `existingDescriptionImages` for image paths to retain; newly uploaded files are appended to those lists. The controller resets image lists from these submitted fields, so include retained paths when editing.
+- Do not manually set `Content-Type` when using `FormData`; the browser must add the multipart boundary.
+- Product image paths are stored as `uploads/products/<filename>`; normalize the leading slash when building display URLs.
 
-Allowed `status` values:
-
-```text
-In Stock | Out of Stock | Pre-order | Draft
-```
-
-Product creation example:
+Example product create request:
 
 ```js
 const formData = new FormData();
 formData.append('name', product.name);
 formData.append('price', String(product.price));
-formData.append('category', product.category);
-formData.append('status', product.status);
-formData.append('image', selectedFile);
+formData.append('category', product.categoryId ?? '');
+formData.append('productImages', selectedFile);
 
-await fetch(`${API_URL}/api/products`, {
+const response = await fetch(`${API_URL}/api/products`, {
   method: 'POST',
   body: formData
 });
-```
-
-Do not manually set the `Content-Type` header when sending `FormData`.
-
-Product images normally return paths such as:
-
-```text
-/uploads/products/filename.png
 ```
 
 ## Categories
 
 Base route: `/api/categories`
 
-| Method | Endpoint | Body | Response |
+| Method | Endpoint | Request | Success response |
 |---|---|---|---|
-| GET | `/api/categories` | None | `{ success: true, data: [...] }` |
-| POST | `/api/categories` | JSON or multipart | `{ success: true, data: category }` |
-| PUT | `/api/categories/:id` | JSON or multipart | `{ success: true, data: category }` |
-| POST | `/api/categories/:id/books` | `{ bookId }` | Updated category |
-| DELETE | `/api/categories/:id/books/:bookId` | None | Updated category |
+| GET | `/api/categories` | None | Raw `Category[]`; each category has populated `books` |
+| POST | `/api/categories` | JSON or multipart form data | `201 Category` |
+| PUT | `/api/categories/:id` | JSON or multipart form data | Updated category document |
+| DELETE | `/api/categories/:id` | None | `{ message }` |
+| POST | `/api/categories/:id/books` | `{ "bookId": "PRODUCT_ID" }` | `{ message }` |
+| DELETE | `/api/categories/:id/books/:bookId` | None | `{ message }` |
 
-Category fields:
-
-```json
-{
-  "name": "Fantasy",
-  "description": "Fantasy books",
-  "color": "#0F4000",
-  "books": ["PRODUCT_ID"]
-}
-```
-
-There is no category delete endpoint.
+Persisted category fields are `name`, `color`, `image`, and `books` (product IDs). `name` is required; `color` defaults to `#0F4000`. `description` is not persisted. Category create/update accept one `image` file (JPEG, PNG, or WebP; maximum 10 MB); uploaded files are stored under `uploads/categories/` and returned as `/uploads/categories/<filename>`. Both routes persist the image path, which the GET endpoint includes in each category document.
 
 ## Series
 
 Base route: `/api/series`
 
-| Method | Endpoint | Body | Response |
+| Method | Endpoint | Request | Success response |
 |---|---|---|---|
-| GET | `/api/series` | None | `{ success: true, data: [...] }` |
-| POST | `/api/series` | JSON or multipart | `{ success: true, data: serie }` |
-| PUT | `/api/series/:id` | JSON or multipart | `{ success: true, data: serie }` |
-| POST | `/api/series/:id/books` | `{ bookId }` | Updated series |
-| DELETE | `/api/series/:id/books/:bookId` | None | Updated series |
+| GET | `/api/series` | None | Raw `Series[]`; each series has populated `books` |
+| POST | `/api/series` | JSON or multipart form data | `201 Series` |
+| PUT | `/api/series/:id` | JSON or multipart form data | Updated series document |
+| DELETE | `/api/series/:id` | None | `{ message }`; `400` if products are assigned |
+| POST | `/api/series/:id/books` | `{ "bookId": "PRODUCT_ID" }` | `{ message }` |
+| DELETE | `/api/series/:id/books/:bookId` | None | `{ message }` |
 
-Series fields:
-
-```json
-{
-  "name": "Harry Potter",
-  "description": "Book series",
-  "books": ["PRODUCT_ID"]
-}
-```
-
-There is no series delete endpoint.
+Persisted series fields are `name`, `description`, `image`, and `books` (product IDs). `name` is required. Create accepts one `image` file (JPEG, PNG, or WebP; maximum 10 MB) and stores its path under `/uploads/series/`. Update currently ignores uploaded image files. The controller accepts `color` in its request but the Series schema has no `color` field, so it is not persisted. Series deletion is available, but fails with `400` while any products still reference that series.
 
 ## Blogs
 
 Base route: `/api/blogs`
 
-| Method | Endpoint | Body | Response |
+| Method | Endpoint | Request | Success response |
 |---|---|---|---|
-| GET | `/api/blogs` | Optional query: `search` | `{ success, count, data }` |
-| GET | `/api/blogs/:id` | None | `{ success, data }` |
-| POST | `/api/blogs` | JSON | `{ success, data }` |
-| PUT | `/api/blogs/:id` | JSON | `{ success, data }` |
+| GET | `/api/blogs` | Optional `?search=` (matches title) | `{ success, count, data: Blog[] }` |
+| GET | `/api/blogs/:id` | None | `{ success, data: Blog }` |
+| POST | `/api/blogs` | JSON or multipart form data (`bannerImage` file) | `201 { success, data: Blog }` |
+| PUT | `/api/blogs/:id` | JSON or multipart form data (`bannerImage` file) | `{ success, data: Blog }` |
 | DELETE | `/api/blogs/:id` | None | `{ success, message }` |
-| GET | `/api/blogs/categories` | None | `{ success, data }` |
-| POST | `/api/blogs/categories` | `{ name, posts }` where `posts` contains blog IDs or existing blog titles | `{ success, data }` |
+| GET | `/api/blogs/categories` | None | `{ success, data: BlogCategory[] }` |
+| POST | `/api/blogs/categories` | `{ name, posts }` | `201 { success, data: BlogCategory }` |
 
 Blog fields:
 
@@ -177,20 +131,32 @@ Blog fields:
 }
 ```
 
-Allowed blog statuses are `Draft` and `Published`.
+`title`, `description`, `body`, and `category` are required. `status` is `Draft` or `Published` (default: `Published`). Create and update accept a single JPEG, PNG, or WebP file (maximum 10 MB) in the multipart field `bannerImage`. Uploaded files are stored under `uploads/blogs/`; the saved and returned `bannerImage` is `/uploads/blogs/<filename>`, served by the backend. Existing `bannerImage` string URLs/paths remain accepted when no file is uploaded.
 
-Blog categories store references to Blog documents. Create the blogs first, then send their `_id` values in `posts`. Existing blog titles are also accepted and resolved to IDs. Unknown titles return `400` with a readable error instead of a Mongoose cast error.
+Example blog create request with a banner upload:
 
-## Important Backend Limitations
+```js
+const formData = new FormData();
+formData.append('title', blog.title);
+formData.append('description', blog.description);
+formData.append('body', blog.body);
+formData.append('category', blog.category);
+formData.append('bannerImage', selectedBannerFile);
 
-- There is no authentication or authorization yet.
-- CORS is open to all origins.
-- Products, categories, and series do not have pagination.
-- Category and series image paths currently return `/uploads/filename`, while uploads are stored under `uploads/products`; those images may need backend correction before production use.
-- The chapter controller is not connected to the server and references an undefined `Book` model. Treat `chapters` as a normal product field until that feature is repaired.
+const response = await fetch(`${API_URL}/api/blogs`, {
+  method: 'POST',
+  body: formData
+});
+const result = await response.json();
+// result.data.bannerImage is `/uploads/blogs/<filename>`
+```
 
-## Copilot Instruction
+Blog categories store references to blog documents. Create blogs first, then send their IDs in `posts`. Existing blog titles are also accepted and resolved to IDs. Unknown titles return `400` with a readable message. Only list and create endpoints are implemented for blog categories; do not assume category update or delete routes exist.
 
-Use this instruction when connecting the dashboard:
+## Known Gaps
 
-> Connect the dashboard to `http://localhost:4000`. Use `/api/products`, `/api/categories`, `/api/series`, and `/api/blogs`. Products return a raw array; the other resources return `{ success, data }`. Use `multipart/form-data` for product create/update and do not manually set its Content-Type. Prepend `http://localhost:4000` to relative image paths. Treat `category` as required for products. Handle loading, empty, validation, and HTTP error states. Do not invent delete endpoints for categories or series. Do not implement chapter management until the backend exposes a working chapter route.
+- There is no authentication or authorization; CORS allows all origins. Do not treat this local API as production-secure.
+- Products, categories, and series have no pagination. Product list filters are not implemented.
+- Category descriptions/images are not persisted by the schema, category image paths do not match their storage directory, and category/series update routes do not save replacement images.
+- Series `color` is not a persisted field.
+- Product `bookChapters` is a string array only. There is no chapter-management endpoint.

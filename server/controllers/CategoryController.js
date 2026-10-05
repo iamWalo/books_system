@@ -1,116 +1,128 @@
 const Category = require('../models/Category');
-const Product = require('../models/Product');
 
-// Get all categories with populated book titles & images
+const normalizeImagePath = (imagePath) => {
+    if (!imagePath) return imagePath;
+    const normalizedPath = String(imagePath).replace(/\\/g, '/').replace(/^\/+/, '');
+    return normalizedPath.startsWith('uploads/')
+        ? `/${normalizedPath}`
+        : `/uploads/${normalizedPath}`;
+};
+
+// 1. Get Categories
 exports.getCategories = async (req, res) => {
     try {
-        const categories = await Category.find().populate('books', 'name image price');
-        res.status(200).json({ success: true, data: categories });
+        const categories = await Category.find().populate('books');
+        res.status(200).json(categories);
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ message: error.message });
     }
 };
 
-// Create Category
+// 2. Create Category
+// Example storing local uploads in categoryController.js
 exports.createCategory = async (req, res) => {
     try {
-        const { name, description, color, books } = req.body;
-        const imagePath = req.file ? `/uploads/${req.file.filename}` : '';
+        const { name, description, color } = req.body;
 
-        let parsedBooks = [];
-        if (books) {
-            parsedBooks = typeof books === 'string' ? JSON.parse(books) : books;
+        // Handle image path if file uploaded via multer
+        let imageUrl = normalizeImagePath(req.body.image || '');
+        if (req.file) {
+            imageUrl = `/uploads/categories/${req.file.filename}`;
         }
 
-        const category = new Category({
-            name,
-            description,
+        let books = [];
+        if (req.body.books) {
+            try {
+                books = typeof req.body.books === 'string' ? JSON.parse(req.body.books) : req.body.books;
+            } catch (e) {
+                books = [];
+            }
+        }
+
+        const newCategory = new Category({
+            name: name.trim(),
+            description: description || '',
             color: color || '#0F4000',
-            image: imagePath,
-            books: parsedBooks,
+            image: imageUrl,
+            books: Array.isArray(books) ? books : []
         });
 
-        const savedCategory = await category.save();
-
-        // Optionally update associated Products with this category reference
-        if (parsedBooks.length > 0) {
-            await Product.updateMany(
-                { _id: { $in: parsedBooks } },
-                { category: savedCategory._id }
-            );
-        }
-
-        res.status(201).json({ success: true, data: savedCategory });
+        const savedCategory = await newCategory.save();
+        res.status(201).json(savedCategory);
     } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
+        res.status(500).json({ message: error.message });
     }
 };
 
-// Update Category
+// 3. Update Category
 exports.updateCategory = async (req, res) => {
     try {
-        const { name, description, color, books } = req.body;
-        const updateData = { name, description, color };
-
-        if (req.file) {
-            updateData.image = `/uploads/${req.file.filename}`;
+        if (!req.body) {
+            return res.status(400).json({ message: 'Request body is missing.' });
         }
 
-        if (books) {
-            updateData.books = typeof books === 'string' ? JSON.parse(books) : books;
+        const { name, description, color } = req.body;
+        let books;
+
+        if (req.body.books) {
+            try {
+                books = typeof req.body.books === 'string' ? JSON.parse(req.body.books) : req.body.books;
+            } catch (e) {
+                books = [];
+            }
         }
 
-        const category = await Category.findByIdAndUpdate(req.params.id, updateData, { new: true }).populate('books', 'name image price');
+        const updateData = {
+            ...(name && { name: name.trim() }),
+            ...(description !== undefined && { description }),
+            ...(color && { color }),
+            ...(req.body.image !== undefined && { image: normalizeImagePath(req.body.image) }),
+            ...(req.file && { image: `/uploads/categories/${req.file.filename}` }),
+            ...(books !== undefined && { books })
+        };
 
-        if (!category) {
-            return res.status(404).json({ success: false, message: 'Category not found' });
-        }
+        const updatedCategory = await Category.findByIdAndUpdate(
+            req.params.id,
+            updateData,
+            { returnDocument: 'after' }
+        );
 
-        res.status(200).json({ success: true, data: category });
+        res.status(200).json(updatedCategory);
     } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
+        res.status(500).json({ message: error.message });
     }
 };
 
-// Add single book to category
+// 4. Delete Category
+exports.deleteCategory = async (req, res) => {
+    try {
+        const categoryId = req.params.id;
+        await Category.findByIdAndDelete(categoryId);
+        res.status(200).json({ message: 'Category deleted successfully.' });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// 5. Add Book to Category
 exports.addBookToCategory = async (req, res) => {
     try {
+        const { id: categoryId } = req.params;
         const { bookId } = req.body;
-        const category = await Category.findById(req.params.id);
-
-        if (!category) {
-            return res.status(404).json({ success: false, message: 'Category not found' });
-        }
-
-        if (!category.books.includes(bookId)) {
-            category.books.push(bookId);
-            await category.save();
-            await Product.findByIdAndUpdate(bookId, { category: category._id });
-        }
-
-        const updated = await Category.findById(category._id).populate('books', 'name image price');
-        res.status(200).json({ success: true, data: updated });
+        await Category.findByIdAndUpdate(categoryId, { $addToSet: { books: bookId } });
+        res.status(200).json({ message: 'Book added to category successfully.' });
     } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
+        res.status(500).json({ message: error.message });
     }
 };
 
-// Remove single book from category
+// 6. Remove Book from Category
 exports.removeBookFromCategory = async (req, res) => {
     try {
-        const { bookId } = req.params;
-        const category = await Category.findById(req.params.id);
-
-        if (!category) {
-            return res.status(404).json({ success: false, message: 'Category not found' });
-        }
-
-        category.books = category.books.filter((b) => b.toString() !== bookId);
-        await category.save();
-
-        const updated = await Category.findById(category._id).populate('books', 'name image price');
-        res.status(200).json({ success: true, data: updated });
+        const { id: categoryId, bookId } = req.params;
+        await Category.findByIdAndUpdate(categoryId, { $pull: { books: bookId } });
+        res.status(200).json({ message: 'Book removed from category successfully.' });
     } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
+        res.status(500).json({ message: error.message });
     }
 };
